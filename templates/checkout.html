@@ -28,6 +28,7 @@
     .radio-group label {
         display: block;
         margin-bottom: 10px;
+        cursor: pointer;
     }
     input[type="radio"] {
         accent-color: #d32f2f;
@@ -59,11 +60,11 @@
         font-weight: 600;
         cursor: pointer;
         transition: background 0.3s;
+        border: none;
     }
     .btn-success {
         background: #4caf50;
         color: white;
-        border: none;
     }
     .btn-success:hover {
         background: #388e3c;
@@ -72,7 +73,9 @@
         background: #d32f2f;
         color: white;
         margin-left: 10px;
-        padding: 6px 25px;
+        padding: 10px 25px;
+        text-decoration: none;
+        display: inline-block;
     }
     .btn-back:hover {
         background: #b71c1c;
@@ -91,38 +94,79 @@
     .margin-input {
         margin-top: 20px;
     }
+    .delivery-info {
+        font-size: 0.85em;
+        color: #666;
+        margin-top: 5px;
+        margin-left: 25px;
+    }
+    .free-delivery {
+        color: #4caf50;
+        font-weight: bold;
+    }
+    .delivery-fee {
+        color: #ff9800;
+    }
+    .pickup-badge {
+        background: #e3f2fd;
+        color: #1976d2;
+        padding: 2px 8px;
+        border-radius: 12px;
+        font-size: 0.75em;
+        margin-left: 10px;
+    }
 </style>
 
 <div class="row">
     <div class="col-2">
         <div class="card">
             <h1>Оформление заказа</h1>
-            <form method="POST">
+            <form method="POST" id="orderForm">
                 {% csrf_token %}
                 
                 <h3>Способ получения</h3>
                 <div class="radio-group">
                     <label>
-                        <input type="radio" name="delivery_type" value="delivery" required onchange="toggleAddress()">
+                        <input type="radio" name="delivery_type" value="delivery" required onchange="updateTotals()" {% if selected_delivery_type == 'delivery' %}checked{% endif %}>
                         Доставка
+                        <span class="pickup-badge" id="deliveryBadge">
+                            {% if food_total_with_discount >= 500 %}
+                                Бесплатно
+                            {% else %}
+                                200 ₽
+                            {% endif %}
+                        </span>
                     </label>
-                    <label>
-                        <input type="radio" name="delivery_type" value="pickup" required onchange="toggleAddress()">
+                    <div class="delivery-info">
+                        {% if food_total_with_discount >= 500 %}
+                            🎉 Бесплатная доставка от 500 ₽
+                        {% else %}
+                            🚚 Доставка 200 ₽ (бесплатно от 500 ₽)
+                        {% endif %}
+                    </div>
+                    
+                    <label style="margin-top: 15px;">
+                        <input type="radio" name="delivery_type" value="pickup" required onchange="updateTotals()" {% if selected_delivery_type == 'pickup' %}checked{% endif %}>
                         Самовывоз
+                        <span class="pickup-badge">0 ₽</span>
                     </label>
+                    <div class="delivery-info">
+                        🏪 Самовывоз бесплатно, ул. Пушкина 10
+                    </div>
                 </div>
                 
-                <div id="address_block" style="display: none; margin-top: 15px;">
+                <div id="address_block" style="display: {% if selected_delivery_type == 'delivery' %}block{% else %}none{% endif %}; margin-top: 15px;">
                     <label>Адрес доставки:</label>
-                    <input type="text" name="address" placeholder="Улица, дом, квартира" class="form-control margin-input">
+                    <input type="text" name="address" placeholder="Улица, дом, квартира" class="form-control margin-input" value="{{ address|default:'' }}">
+                    <small style="color: #666;">Укажите точный адрес для доставки</small>
                 </div>
                 
                 <h3 style="margin-top: 20px;">Комментарий</h3>
-                <textarea name="comment" rows="3" placeholder="Дополнительные пожелания" class="form-control"></textarea>
+                <textarea name="comment" rows="3" placeholder="Дополнительные пожелания" class="form-control">{{ comment|default:'' }}</textarea>
                 
                 <div style="margin-top: 20px; display: flex; align-items: center;">
-                    <button type="submit" class="btn btn-success">Подтвердить заказ</button>
-                    <a href="/cart" class="btn btn-back">Вернуться в корзину</a>
+                    <button type="submit" class="btn btn-success">✅ Подтвердить заказ</button>
+                    <a href="/cart" class="btn btn-back">← Вернуться в корзину</a>
                 </div>
             </form>
         </div>
@@ -138,44 +182,128 @@
                     <td class="text-right">{{ item.total|floatformat:2 }} ₽</td>
                 </tr>
                 {% endfor %}
+                
+                {% if discount_percent > 0 %}
+                <tr>
+                    <td><strong>Скидка ({{ discount_percent }}%):</strong></td>
+                    <td class="text-right" style="color: #4caf50;">-{{ discount_amount|floatformat:2 }} ₽</td>
+                </tr>
+                <tr>
+                    <td><strong>Сумма со скидкой:</strong></td>
+                    <td class="text-right">{{ food_total_with_discount|floatformat:2 }} ₽</td>
+                </tr>
+                {% endif %}
+                
                 <tr style="border-top: 1px solid #ddd;">
                     <td><strong>Товары:</strong></td>
                     <td class="text-right">{{ total|floatformat:2 }} ₽</td>
                 </tr>
                 <tr>
                     <td><strong>Доставка:</strong></td>
-                    <td class="text-right">
+                    <td class="text-right" id="deliveryFeeCell">
                         {% if delivery_fee > 0 %}
-                            {{ delivery_fee }} ₽
+                            <span class="delivery-fee">{{ delivery_fee }} ₽</span>
                         {% else %}
-                            Бесплатно
+                            <span class="free-delivery">Бесплатно</span>
                         {% endif %}
                     </td>
                 </tr>
                 <tr style="border-top: 2px solid #d32f2f;">
                     <td><strong>Итого:</strong></td>
-                    <td class="text-right"><strong style="color: #d32f2f;">{{ grand_total|floatformat:2 }} ₽</strong></td>
+                    <td class="text-right"><strong style="color: #d32f2f; font-size: 1.2em;" id="grandTotal">{{ grand_total|floatformat:2 }} ₽</strong></td>
                 </tr>
             </table>
+            
+            {% if food_total_with_discount < 500 %}
+            <div style="margin-top: 15px; padding: 10px; background: #fff3e0; border-radius: 8px;">
+                <small>💡 Добавьте товаров на <strong>{{ free_delivery_need|floatformat:2 }} ₽</strong> для бесплатной доставки</small>
+            </div>
+            {% endif %}
         </div>
     </div>
 </div>
 
 <script>
-    function toggleAddress() {
-        const deliveryType = document.querySelector('input[name="delivery_type"]:checked');
+    // Данные из Django
+    const foodTotal = {{ food_total_with_discount|default:0 }};
+    const freeDeliveryThreshold = {{ free_delivery_threshold|default:500 }};
+    const deliveryFeeNormal = 200;
+    
+    function updateTotals() {
+        const selectedType = document.querySelector('input[name="delivery_type"]:checked');
         const addressBlock = document.getElementById('address_block');
-        if (deliveryType && deliveryType.value === 'delivery') {
+        const deliveryFeeCell = document.getElementById('deliveryFeeCell');
+        const grandTotalSpan = document.getElementById('grandTotal');
+        const deliveryBadge = document.getElementById('deliveryBadge');
+        
+        if (!selectedType) return;
+        
+        let deliveryFee = 0;
+        let deliveryText = '';
+        
+        if (selectedType.value === 'delivery') {
+            // Доставка: бесплатно от 500 ₽
             addressBlock.style.display = 'block';
+            if (foodTotal >= freeDeliveryThreshold) {
+                deliveryFee = 0;
+                deliveryText = '<span class="free-delivery">Бесплатно</span>';
+                if (deliveryBadge) deliveryBadge.textContent = 'Бесплатно';
+            } else {
+                deliveryFee = deliveryFeeNormal;
+                deliveryText = '<span class="delivery-fee">' + deliveryFeeNormal + ' ₽</span>';
+                if (deliveryBadge) deliveryBadge.textContent = deliveryFeeNormal + ' ₽';
+            }
         } else {
+            // Самовывоз: всегда бесплатно
             addressBlock.style.display = 'none';
+            deliveryFee = 0;
+            deliveryText = '<span class="free-delivery">Бесплатно</span>';
+            if (deliveryBadge) deliveryBadge.textContent = '0 ₽';
+        }
+        
+        // Обновляем отображение
+        if (deliveryFeeCell) {
+            deliveryFeeCell.innerHTML = deliveryText;
+        }
+        
+        // Пересчитываем итог
+        const grandTotal = foodTotal + deliveryFee;
+        if (grandTotalSpan) {
+            grandTotalSpan.innerHTML = grandTotal.toFixed(2) + ' ₽';
         }
     }
-    window.addEventListener('DOMContentLoaded', () => {
-        const checked = document.querySelector('input[name="delivery_type"]:checked');
-        if (checked && checked.value === 'delivery') {
-            document.getElementById('address_block').style.display = 'block';
+    
+    // Валидация формы перед отправкой
+    document.getElementById('orderForm').addEventListener('submit', function(e) {
+        const selectedType = document.querySelector('input[name="delivery_type"]:checked');
+        const addressInput = document.querySelector('input[name="address"]');
+        
+        if (!selectedType) {
+            e.preventDefault();
+            alert('Пожалуйста, выберите способ получения заказа');
+            return false;
         }
+        
+        if (selectedType.value === 'delivery') {
+            if (!addressInput || !addressInput.value.trim()) {
+                e.preventDefault();
+                alert('Пожалуйста, укажите адрес доставки');
+                addressInput.focus();
+                return false;
+            }
+            
+            if (addressInput.value.trim().length < 5) {
+                e.preventDefault();
+                alert('Пожалуйста, укажите полный адрес доставки');
+                addressInput.focus();
+                return false;
+            }
+        }
+    });
+    
+    // Инициализация при загрузке
+    document.addEventListener('DOMContentLoaded', function() {
+        updateTotals();
     });
 </script>
 {% endblock %}

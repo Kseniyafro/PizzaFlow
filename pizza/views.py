@@ -1,14 +1,17 @@
+import json
 from django.shortcuts import render, redirect, get_object_or_404
-from django.http import JsonResponse
+from django.http import JsonResponse, HttpResponse
 from django.contrib import messages
 from django.db.models import Q
 from .models import *
 from django.contrib.auth.hashers import make_password, check_password
 from django.utils import timezone
-from datetime import datetime, date
-import json
+from datetime import datetime, date, timedelta
 from .optimizer import DeliveryOptimizer, PriceCalculator
-from .strategies import OrderContext, StandardPricing, LoyaltyPricing, StandardDelivery, PickupStrategy
+from .strategies import (
+    OrderContext, StandardPricing, LoyaltyPricing, DiscountPricing,
+    StandardDelivery, ExpressDelivery, PickupStrategy
+)
 from .singletons import ConfigManager, EventBus, CacheManager
 from .factories import ClassicPizzaFactory, MeatLoversFactory, CheeseLoversFactory, VeggieFactory
 from .decorators import BasePizza, ToppingDecorator
@@ -305,25 +308,94 @@ def update_cart_quantity(request):
 def create_order(request):
     if 'user_id' not in request.session:
         return redirect('login')
+    
     cart = request.session.get('cart', {})
     total = sum(item['price'] * item['quantity'] for item in cart.values())
+    
     if total == 0:
         messages.warning(request, 'Корзина пуста')
         return redirect('constructor')
+    
     if request.method == 'POST':
         delivery_type = request.POST.get('delivery_type')
+        address = request.POST.get('address', '')
+        comment = request.POST.get('comment', '')
+        
         from .order_processor import DeliveryOrderProcessor, PickupOrderProcessor
+        
         if delivery_type == 'delivery':
             processor = DeliveryOrderProcessor()
         else:
             processor = PickupOrderProcessor()
+        
         order = processor.process(request, cart, total)
+        
+        # Обновляем адрес и комментарий
+        if delivery_type == 'delivery':
+            order.address = address
+        order.comment = comment
+        order.save()
+        
+        # Получаем скидку
+        total_quantity = sum(item['quantity'] for item in cart.values())
+        
+        if total_quantity >= 3:
+            pricing_strategy = DiscountPricing(10)
+            food_total_with_discount = pricing_strategy.calculate(total, 0, 1)
+        else:
+            food_total_with_discount = total
+        
+        # Рассчитываем доставку ПРАВИЛЬНО
+        if delivery_type == 'pickup':
+            # Самовывоз - всегда бесплатно
+            delivery_fee = 0
+        else:
+            # Доставка - бесплатно от 500 ₽
+            if food_total_with_discount >= 500:
+                delivery_fee = 0
+            else:
+                delivery_fee = 200
+        
+        final_total = food_total_with_discount + delivery_fee
+        
+        # Обновляем сумму заказа
+        order.amount = final_total
+        order.save()
+        
         order_subject.notify(order)
         event_bus.publish('order_status_changed', {'order_id': order.order_id, 'status': order.status})
         messages.success(request, f'Заказ #{order.order_id} успешно создан')
         return redirect('my_orders')
-    delivery_fee = 200 if total < 500 else 0
-    grand_total = total + delivery_fee
+    
+    # GET часть - отображение страницы оформления
+    total_quantity = sum(item['quantity'] for item in cart.values())
+    
+    discount_percent = 0
+    food_total_with_discount = total
+    
+    if total_quantity >= 3:
+        discount_percent = 10
+        pricing_strategy = DiscountPricing(10)
+        food_total_with_discount = pricing_strategy.calculate(total, 0, 1)
+    
+    # Получаем тип доставки из параметров URL или из сессии
+    delivery_type = request.GET.get('delivery_type')
+    if not delivery_type:
+        delivery_type = request.session.get('last_delivery_type', 'delivery')
+    
+    # Сохраняем в сессию для следующего раза
+    request.session['last_delivery_type'] = delivery_type
+    
+    if delivery_type == 'pickup':
+        delivery_fee = 0
+    else:
+        if food_total_with_discount >= 500:
+            delivery_fee = 0
+        else:
+            delivery_fee = 200
+    
+    grand_total = food_total_with_discount + delivery_fee
+    
     cart_items = []
     for key, item in cart.items():
         cart_items.append({
@@ -333,12 +405,23 @@ def create_order(request):
             'quantity': item['quantity'],
             'total': item['price'] * item['quantity']
         })
+    
+    # Вычисляем сколько не хватает до бесплатной доставки
+    free_delivery_need = max(0, 500 - food_total_with_discount)
+    
     context = {
         'cart_items': cart_items,
         'total': total,
+        'discount_percent': discount_percent,
+        'discount_amount': total - food_total_with_discount,
+        'food_total_with_discount': food_total_with_discount,
         'delivery_fee': delivery_fee,
         'grand_total': grand_total,
-        'free_delivery_threshold': 500
+        'free_delivery_threshold': 500,
+        'free_delivery_need': free_delivery_need,
+        'selected_delivery_type': delivery_type,
+        'address': request.GET.get('address', ''),
+        'comment': request.GET.get('comment', ''),
     }
     return render(request, 'checkout.html', context)
 
@@ -457,27 +540,43 @@ def pizza_menu(request):
 
 def optimize_route_api(request):
     if request.method == 'GET':
-        pending_orders = Order.objects.filter(status__in=['В печи', 'Передан курьеру'], delivery_type='delivery')[:5]
+        pending_orders = Order.objects.filter(
+            status__in=['Принят', 'В печи', 'Передан курьеру'], 
+            delivery_type='delivery'
+        ).order_by('-order_id')[:10]
+        
         if not pending_orders:
-            return JsonResponse({'route': [], 'distance': 0, 'message': 'Нет заказов для доставки'})
+            return JsonResponse({'success': False, 'message': 'Нет заказов для доставки'})
+
         restaurant_coords = (55.751244, 37.618423)
         deliveries = []
+        
         for i, order in enumerate(pending_orders):
             deliveries.append({
                 'order_id': order.order_id,
-                'lat': 55.751244 + (i * 0.01), 
-                'lng': 37.618423 + (i * 0.01),
-                'address': order.address
+                'lat': 55.751244 + (order.order_id * 0.0001), 
+                'lng': 37.618423 + (order.order_id * 0.0001),
+                'address': order.address or "Адрес не указан"
             })
+            
         optimizer = DeliveryOptimizer()
         route, distance = optimizer.optimize_route(restaurant_coords, deliveries)
-        return JsonResponse({
+        
+        response_data = {
             'success': True,
             'route': route,
             'distance_km': round(distance, 2),
             'orders_count': len(pending_orders)
-        })
+        }
+
+        return HttpResponse(
+            json.dumps(response_data, ensure_ascii=False),
+            content_type="application/json; charset=utf-8"
+        )
     return JsonResponse({'error': 'Method not allowed'}, status=405)
+
+def check_route_page(request):
+    return render(request, 'logistics_check.html')
 
 def get_config_api(request):
     if request.method == 'GET':
@@ -592,7 +691,6 @@ def assign_courier_to_order(request, courier_id):
 def sales_report(request):
     if request.session.get('role') != 'admin':
         return redirect('admin_login')
-    from datetime import datetime, timedelta
     end_date = datetime.now()
     start_date = end_date - timedelta(days=30)
     orders = Order.objects.filter(created_at__gte=start_date, status='Доставлен')

@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Оптимизация маршрута PizzaFlow</title>
+    <style>
+        body { font-family: sans-serif; background: #1a1a1a; color: white; padding: 40px; }
+        .route-container { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
+        .point { 
+            background: #2d2d2d; border: 2px solid #007bff; 
+            padding: 15px; border-radius: 10px; min-width: 150px; text-align: center;
+            position: relative;
+        }
+        .point.start { border-color: #28a745; }
+        .arrow { font-size: 24px; color: #666; }
+        .info { margin-bottom: 30px; background: #333; padding: 20px; border-radius: 8px; }
+        h2 { color: #ffc107; }
+        .order-id { font-weight: bold; color: #007bff; }
+    </style>
+</head>
+<body>
+    <h1>Маршрутный лист курьера (A* Оптимизация)</h1>
+    
+    <div class="info" id="summary">
+        Загрузка данных...
+    </div>
+
+    <div class="route-container" id="route-display">
+        </div>
+
+    <script>
+        fetch('/api/optimize-route/')
+    .then(response => {
+        if (!response.ok) throw new Error('Ошибка сети или доступа');
+        return response.json();
+    })
+    .then(data => {
+        console.log("Данные получены:", data); // Увидим в консоли
+        if (data.success) {
+            const container = document.getElementById('route-display');
+            const summary = document.getElementById('summary');
+            
+            summary.innerHTML = `
+                <p>Всего заказов: <strong>${data.orders_count}</strong></p>
+                <p>Общая дистанция: <strong>${data.distance_km} км</strong></p>
+            `;
+            
+            container.innerHTML = '';
+            data.route.forEach((point, index) => {
+                const div = document.createElement('div');
+                div.className = `point ${index === 0 ? 'start' : ''}`;
+                const name = point.name || `Заказ #${point.order_id}`;
+                div.innerHTML = `
+                    <div class="order-id">${name}</div>
+                    <div style="font-size: 0.8em; color: #aaa;">${point.address || 'Адрес не указан'}</div>
+                `;
+                container.appendChild(div);
+                if (index < data.route.length - 1) {
+                    const arrow = document.createElement('div');
+                    arrow.className = 'arrow';
+                    arrow.innerHTML = '➔';
+                    container.appendChild(arrow);
+                }
+            });
+        }
+    })
+    .catch(error => {
+        document.getElementById('summary').innerHTML = 
+            `<b style="color: red;">Ошибка: ${error.message}. Проверьте консоль (F12)</b>`;
+    });
+    </script>
+</body>
+</html>

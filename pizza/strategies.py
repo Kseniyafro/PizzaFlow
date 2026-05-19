@@ -1,5 +1,7 @@
 from abc import ABC, abstractmethod
 
+# ============ Стратегии ценообразования ============
+
 class PricingStrategy(ABC):
     @abstractmethod
     def calculate(self, base_price, toppings_price, quantity):
@@ -40,6 +42,8 @@ class LoyaltyPricing(PricingStrategy):
         return total - max_discount
 
 
+# ============ Стратегии доставки ============
+
 class DeliveryStrategy(ABC):
     @abstractmethod
     def calculate_cost(self, distance_km, total_amount):
@@ -65,6 +69,8 @@ class PickupStrategy(DeliveryStrategy):
         return 0
 
 
+# ============ Контекст для заказа ============
+
 class OrderContext:
     def __init__(self, pricing_strategy=None, delivery_strategy=None):
         self._pricing_strategy = pricing_strategy or StandardPricing()
@@ -80,47 +86,3 @@ class OrderContext:
         food_total = self._pricing_strategy.calculate(base_price, toppings_price, quantity)
         delivery_cost = self._delivery_strategy.calculate_cost(distance_km, total_amount)
         return food_total + delivery_cost
-
-
-class NotificationStrategy(ABC):
-    @abstractmethod
-    def send(self, user, message):
-        pass
-
-
-class EmailNotification(NotificationStrategy):
-    def send(self, user, message):
-        print(f"Email to {user.email}: {message}")
-        return True
-
-
-class SMSNotification(NotificationStrategy):
-    def send(self, user, message):
-        print(f"SMS to {user.phone}: {message}")
-        return True
-
-
-class PushNotification(NotificationStrategy):
-    def send(self, user, message):
-        print(f"Push to {user.name}: {message}")
-        return True
-
-
-class NotificationManager:
-    _instance = None
-    
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._strategies = {
-                'email': EmailNotification(),
-                'sms': SMSNotification(),
-                'push': PushNotification()
-            }
-        return cls._instance
-    
-    def send_notification(self, user, message, method='email'):
-        strategy = self._strategies.get(method)
-        if strategy:
-            return strategy.send(user, message)
-        return False

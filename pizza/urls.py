@@ -21,6 +21,7 @@ urlpatterns = [
     path('api/remove-from-cart/', views.remove_from_cart, name='remove_from_cart'),
     path('api/update-cart/', views.update_cart_quantity, name='update_cart'),
     path('api/optimize-route/', views.optimize_route_api, name='optimize_route'),
+    path('check-route/', views.check_route_page, name='check_route_page'),
     path('api/config/', views.get_config_api, name='get_config'),
     path('api/order/<int:order_id>/status/', views.get_order_status, name='get_order_status'),
     path('api/cart-count/', views.get_cart_count, name='get_cart_count'),

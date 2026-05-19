@@ -52,7 +52,6 @@ class DeliveryOptimizer:
         points = [restaurant_coords] + [(d['lat'], d['lng']) for d in deliveries]
         n = len(points)
         
-        # Генерация матрицы расстояний
         matrix = [[self.haversine_distance(points[i][0], points[i][1], 
                                          points[j][0], points[j][1]) 
                   for j in range(n)] for i in range(n)]
@@ -63,7 +62,6 @@ class DeliveryOptimizer:
         if not path_indices:
             return [], 0
 
-        # Формирование упорядоченного маршрута
         optimized_route = []
         for idx in path_indices:
             if idx == 0:
@@ -86,14 +84,10 @@ class PriceCalculator:
     def calculate_total_price(self, base_price, toppings_price, quantity, distance_km):
 
         subtotal = (float(base_price) + float(toppings_price)) * int(quantity)
-        
-        # Базовая стоимость доставки
         delivery_cost = 0
         if distance_km > 0:
-            # 100 руб старт + 20 руб за каждый км
             delivery_cost = 100 + (float(distance_km) * 20)
             
-        # Условие бесплатной доставки (Порог 500 руб)
         if subtotal >= 500:
             delivery_cost = 0
             
