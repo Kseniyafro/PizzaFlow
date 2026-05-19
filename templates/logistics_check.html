@@ -1,73 +1,285 @@
-<!DOCTYPE html>
-<html lang="ru">
-<head>
-    <meta charset="UTF-8">
-    <title>Оптимизация маршрута PizzaFlow</title>
-    <style>
-        body { font-family: sans-serif; background: #1a1a1a; color: white; padding: 40px; }
-        .route-container { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
-        .point { 
-            background: #2d2d2d; border: 2px solid #007bff; 
-            padding: 15px; border-radius: 10px; min-width: 150px; text-align: center;
-            position: relative;
-        }
-        .point.start { border-color: #28a745; }
-        .arrow { font-size: 24px; color: #666; }
-        .info { margin-bottom: 30px; background: #333; padding: 20px; border-radius: 8px; }
-        h2 { color: #ffc107; }
-        .order-id { font-weight: bold; color: #007bff; }
-    </style>
-</head>
-<body>
-    <h1>Маршрутный лист курьера (A* Оптимизация)</h1>
+{% extends 'base.html' %}
+
+{% block content %}
+<style>
+    .logistics-container {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 20px;
+    }
     
-    <div class="info" id="summary">
-        Загрузка данных...
-    </div>
-
-    <div class="route-container" id="route-display">
-        </div>
-
-    <script>
-        fetch('/api/optimize-route/')
-    .then(response => {
-        if (!response.ok) throw new Error('Ошибка сети или доступа');
-        return response.json();
-    })
-    .then(data => {
-        console.log("Данные получены:", data); // Увидим в консоли
-        if (data.success) {
-            const container = document.getElementById('route-display');
-            const summary = document.getElementById('summary');
-            
-            summary.innerHTML = `
-                <p>Всего заказов: <strong>${data.orders_count}</strong></p>
-                <p>Общая дистанция: <strong>${data.distance_km} км</strong></p>
-            `;
-            
-            container.innerHTML = '';
-            data.route.forEach((point, index) => {
-                const div = document.createElement('div');
-                div.className = `point ${index === 0 ? 'start' : ''}`;
-                const name = point.name || `Заказ #${point.order_id}`;
-                div.innerHTML = `
-                    <div class="order-id">${name}</div>
-                    <div style="font-size: 0.8em; color: #aaa;">${point.address || 'Адрес не указан'}</div>
-                `;
-                container.appendChild(div);
-                if (index < data.route.length - 1) {
-                    const arrow = document.createElement('div');
-                    arrow.className = 'arrow';
-                    arrow.innerHTML = '➔';
-                    container.appendChild(arrow);
-                }
-            });
+    .logistics-header {
+        text-align: center;
+        margin-bottom: 2rem;
+    }
+    
+    .logistics-header h1 {
+        font-size: 2rem;
+        color: #2c3e50;
+        margin-bottom: 0.5rem;
+    }
+    
+    .info-card {
+        background: white;
+        border-radius: 16px;
+        padding: 1.5rem;
+        margin-bottom: 2rem;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        border-left: 4px solid #d32f2f;
+    }
+    
+    .info-stats {
+        display: flex;
+        gap: 2rem;
+        flex-wrap: wrap;
+    }
+    
+    .stat-item {
+        display: flex;
+        align-items: baseline;
+        gap: 0.5rem;
+    }
+    
+    .stat-label {
+        color: #666;
+        font-size: 0.9rem;
+    }
+    
+    .stat-value {
+        font-size: 1.5rem;
+        font-weight: bold;
+        color: #d32f2f;
+    }
+    
+    .route-container {
+        display: flex;
+        align-items: center;
+        gap: 20px;
+        flex-wrap: wrap;
+        justify-content: center;
+        background: white;
+        border-radius: 16px;
+        padding: 2rem;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        overflow-x: auto;
+    }
+    
+    .point {
+        background: #f8f9fa;
+        border: 2px solid #2196f3;
+        padding: 1rem;
+        border-radius: 12px;
+        min-width: 160px;
+        text-align: center;
+        transition: transform 0.3s ease;
+    }
+    
+    .point:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+    }
+    
+    .point.start {
+        border-color: #4caf50;
+        background: #e8f5e9;
+    }
+    
+    .point.start .order-id {
+        color: #4caf50;
+    }
+    
+    .order-id {
+        font-weight: bold;
+        color: #2196f3;
+        font-size: 1rem;
+        margin-bottom: 0.5rem;
+    }
+    
+    .point-address {
+        font-size: 0.8rem;
+        color: #666;
+    }
+    
+    .arrow {
+        font-size: 28px;
+        color: #d32f2f;
+        font-weight: bold;
+    }
+    
+    .loading-spinner {
+        display: inline-block;
+        width: 40px;
+        height: 40px;
+        border: 4px solid #f3f3f3;
+        border-top: 4px solid #d32f2f;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+        margin-bottom: 1rem;
+    }
+    
+    @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+    }
+    
+    .error-card {
+        background: #ffebee;
+        border-radius: 16px;
+        padding: 2rem;
+        text-align: center;
+        border-left: 4px solid #f44336;
+    }
+    
+    .error-card p {
+        color: #c62828;
+    }
+    
+    .btn-refresh {
+        display: inline-block;
+        margin-top: 2rem;
+        padding: 0.75rem 1.5rem;
+        background: #d32f2f;
+        color: white;
+        text-decoration: none;
+        border-radius: 50px;
+        transition: all 0.3s ease;
+        font-weight: 600;
+        border: none;
+        cursor: pointer;
+    }
+    
+    .btn-refresh:hover {
+        background: #b71c1c;
+        transform: translateY(-2px);
+    }
+    
+    .btn-back {
+        display: inline-block;
+        margin-top: 2rem;
+        margin-left: 1rem;
+        padding: 0.75rem 1.5rem;
+        background: #95a5a6;
+        color: white;
+        text-decoration: none;
+        border-radius: 50px;
+        transition: all 0.3s ease;
+        font-weight: 600;
+    }
+    
+    .btn-back:hover {
+        background: #7f8c8d;
+        transform: translateY(-2px);
+    }
+    
+    @media (max-width: 768px) {
+        .route-container {
+            flex-direction: column;
         }
-    })
-    .catch(error => {
-        document.getElementById('summary').innerHTML = 
-            `<b style="color: red;">Ошибка: ${error.message}. Проверьте консоль (F12)</b>`;
-    });
-    </script>
-</body>
-</html>
+        
+        .arrow {
+            transform: rotate(90deg);
+        }
+        
+        .point {
+            width: 100%;
+            max-width: 300px;
+        }
+    }
+</style>
+
+<div class="logistics-container">
+    <div class="logistics-header">
+        <h1>Маршрутный лист курьера</h1>
+        <p>Оптимизация маршрута с использованием A* алгоритма</p>
+    </div>
+    
+    <div id="summary" class="info-card">
+        <div class="loading-spinner"></div>
+        <p style="text-align: center; color: #666;">Загрузка данных...</p>
+    </div>
+    
+    <div id="route-display" class="route-container"></div>
+    
+    <div style="text-align: center;">
+        <button onclick="loadRoute()" class="btn-refresh">⟳ Обновить маршрут</button>
+        <a href="/admin-dashboard" class="btn-back">← Вернуться в админ-панель</a>
+    </div>
+</div>
+
+<script>
+    function loadRoute() {
+        const summaryDiv = document.getElementById('summary');
+        const routeDiv = document.getElementById('route-display');
+        
+        summaryDiv.innerHTML = '<div class="loading-spinner"></div><p style="text-align: center; color: #666;">Загрузка данных...</p>';
+        routeDiv.innerHTML = '';
+        
+        fetch('/api/optimize-route/')
+            .then(response => {
+                if (!response.ok) throw new Error('Ошибка сети');
+                return response.json();
+            })
+            .then(data => {
+                if (data.success && data.route && data.route.length > 0) {
+                    summaryDiv.innerHTML = `
+                        <div class="info-stats">
+                            <div class="stat-item">
+                                <span class="stat-label">Всего заказов:</span>
+                                <span class="stat-value">${data.orders_count}</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Общая дистанция:</span>
+                                <span class="stat-value">${data.distance_km} км</span>
+                            </div>
+                        </div>
+                    `;
+                    
+                    data.route.forEach((point, index) => {
+                        const div = document.createElement('div');
+                        div.className = `point ${index === 0 ? 'start' : ''}`;
+                        
+                        let name = '';
+                        let address = '';
+                        const isLastPoint = (index === data.route.length - 1);
+                        
+                        if (point.name === 'Пиццерия') {
+                            name = 'Пиццерия';
+                            address = 'Точка отправления';
+                        } else {
+                            name = `Заказ #${point.order_id}`;
+                            address = point.address || 'Адрес не указан';
+                        }
+                        
+                        let footerHtml = '';
+                        if (index === 0) {
+                            footerHtml = '<div style="margin-top: 8px; font-size: 0.7rem; color: #4caf50;">СТАРТ</div>';
+                        } else if (isLastPoint) {
+                            footerHtml = '<div style="margin-top: 8px; font-size: 0.7rem; color: #f44336;">ФИНИШ</div>';
+                        }
+                        
+                        div.innerHTML = `
+                            <div class="order-id">${name}</div>
+                            <div class="point-address">${address}</div>
+                            ${footerHtml}
+                        `;
+                        routeDiv.appendChild(div);
+                        
+                        if (index < data.route.length - 1) {
+                            const arrow = document.createElement('div');
+                            arrow.className = 'arrow';
+                            arrow.innerHTML = '→';
+                            routeDiv.appendChild(arrow);
+                        }
+                    });
+                } else {
+                    summaryDiv.innerHTML = `<div class="error-card"><p>Нет заказов для доставки</p></div>`;
+                }
+            })
+            .catch(error => {
+                summaryDiv.innerHTML = `<div class="error-card"><p>Ошибка: ${error.message}</p></div>`;
+            });
+    }
+    
+    document.addEventListener('DOMContentLoaded', loadRoute);
+</script>
+{% endblock %}

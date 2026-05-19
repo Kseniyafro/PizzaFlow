@@ -139,9 +139,9 @@
                     </label>
                     <div class="delivery-info">
                         {% if food_total_with_discount >= 500 %}
-                            🎉 Бесплатная доставка от 500 ₽
+                            Бесплатная доставка от 500 ₽
                         {% else %}
-                            🚚 Доставка 200 ₽ (бесплатно от 500 ₽)
+                            Доставка 200 ₽ (бесплатно от 500 ₽)
                         {% endif %}
                     </div>
                     
@@ -151,7 +151,7 @@
                         <span class="pickup-badge">0 ₽</span>
                     </label>
                     <div class="delivery-info">
-                        🏪 Самовывоз бесплатно, ул. Пушкина 10
+                        Самовывоз бесплатно, ул. Пушкина 10
                     </div>
                 </div>
                 
@@ -165,8 +165,8 @@
                 <textarea name="comment" rows="3" placeholder="Дополнительные пожелания" class="form-control">{{ comment|default:'' }}</textarea>
                 
                 <div style="margin-top: 20px; display: flex; align-items: center;">
-                    <button type="submit" class="btn btn-success">✅ Подтвердить заказ</button>
-                    <a href="/cart" class="btn btn-back">← Вернуться в корзину</a>
+                    <button type="submit" class="btn btn-success">Подтвердить заказ</button>
+                    <a href="/cart" class="btn btn-back">Вернуться в корзину</a>
                 </div>
             </form>
         </div>
@@ -216,7 +216,7 @@
             
             {% if food_total_with_discount < 500 %}
             <div style="margin-top: 15px; padding: 10px; background: #fff3e0; border-radius: 8px;">
-                <small>💡 Добавьте товаров на <strong>{{ free_delivery_need|floatformat:2 }} ₽</strong> для бесплатной доставки</small>
+                <small>Добавьте товаров на <strong>{{ free_delivery_need|floatformat:2 }} ₽</strong> для бесплатной доставки</small>
             </div>
             {% endif %}
         </div>
@@ -224,7 +224,6 @@
 </div>
 
 <script>
-    // Данные из Django
     const foodTotal = {{ food_total_with_discount|default:0 }};
     const freeDeliveryThreshold = {{ free_delivery_threshold|default:500 }};
     const deliveryFeeNormal = 200;
@@ -242,7 +241,6 @@
         let deliveryText = '';
         
         if (selectedType.value === 'delivery') {
-            // Доставка: бесплатно от 500 ₽
             addressBlock.style.display = 'block';
             if (foodTotal >= freeDeliveryThreshold) {
                 deliveryFee = 0;
@@ -254,26 +252,22 @@
                 if (deliveryBadge) deliveryBadge.textContent = deliveryFeeNormal + ' ₽';
             }
         } else {
-            // Самовывоз: всегда бесплатно
             addressBlock.style.display = 'none';
             deliveryFee = 0;
             deliveryText = '<span class="free-delivery">Бесплатно</span>';
             if (deliveryBadge) deliveryBadge.textContent = '0 ₽';
         }
         
-        // Обновляем отображение
         if (deliveryFeeCell) {
             deliveryFeeCell.innerHTML = deliveryText;
         }
         
-        // Пересчитываем итог
         const grandTotal = foodTotal + deliveryFee;
         if (grandTotalSpan) {
             grandTotalSpan.innerHTML = grandTotal.toFixed(2) + ' ₽';
         }
     }
     
-    // Валидация формы перед отправкой
     document.getElementById('orderForm').addEventListener('submit', function(e) {
         const selectedType = document.querySelector('input[name="delivery_type"]:checked');
         const addressInput = document.querySelector('input[name="address"]');
@@ -301,7 +295,6 @@
         }
     });
     
-    // Инициализация при загрузке
     document.addEventListener('DOMContentLoaded', function() {
         updateTotals();
     });

@@ -5,6 +5,7 @@
     .orders-container {
         max-width: 1200px;
         margin: 0 auto;
+        padding: 20px;
     }
     
     .orders-header {
@@ -22,17 +23,95 @@
         color: #7f8c8d;
     }
     
+    .cache-badge {
+        display: inline-block;
+        background: #4caf50;
+        color: white;
+        padding: 0.25rem 0.75rem;
+        border-radius: 20px;
+        font-size: 0.75rem;
+        margin-left: 1rem;
+        vertical-align: middle;
+    }
+    
+    .stats-row {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 1rem;
+        margin-bottom: 2rem;
+    }
+    
+    .stat-card {
+        background: white;
+        border-radius: 12px;
+        padding: 1rem;
+        text-align: center;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+    
+    .stat-value {
+        font-size: 1.8rem;
+        font-weight: bold;
+        color: #d32f2f;
+    }
+    
+    .stat-label {
+        color: #666;
+        font-size: 0.85rem;
+    }
+    
+    .reports-row {
+        display: flex;
+        gap: 1rem;
+        margin-bottom: 2rem;
+        flex-wrap: wrap;
+        justify-content: center;
+    }
+    
+    .report-btn {
+        display: inline-block;
+        padding: 0.75rem 1.5rem;
+        background: #2196f3;
+        color: white;
+        text-decoration: none;
+        border-radius: 8px;
+        transition: all 0.3s ease;
+        font-weight: 600;
+    }
+    
+    .report-btn:hover {
+        background: #1976d2;
+        transform: translateY(-2px);
+    }
+    
+    .report-btn.sales {
+        background: #4caf50;
+    }
+    
+    .report-btn.sales:hover {
+        background: #388e3c;
+    }
+    
+    .report-btn.popular {
+        background: #ff9800;
+    }
+    
+    .report-btn.popular:hover {
+        background: #f57c00;
+    }
+    
     .orders-table {
         width: 100%;
         background: white;
         border-radius: 12px;
-        overflow: hidden;
+        overflow-x: auto;
         box-shadow: 0 2px 10px rgba(0,0,0,0.1);
     }
     
     .orders-table table {
         width: 100%;
         border-collapse: collapse;
+        min-width: 600px;
     }
     
     .orders-table th {
@@ -41,6 +120,7 @@
         padding: 1rem;
         text-align: left;
         font-weight: 600;
+        border-bottom: 2px solid #1a252f;
     }
     
     .orders-table td {
@@ -96,9 +176,24 @@
         color: #2c3e50;
     }
     
+    .refresh-btn {
+        display: inline-block;
+        padding: 0.75rem 1.5rem;
+        background: #82059e;
+        color: white;
+        text-decoration: none;
+        border-radius: 8px;
+        transition: background 0.3s ease;
+        border: none;
+        cursor: pointer;
+    }
+    
+    .refresh-btn:hover {
+        background: #5b056e;
+    }
+    
     .admin-link {
         display: inline-block;
-        margin-top: 1.5rem;
         padding: 0.75rem 1.5rem;
         background: #2c3e50;
         color: white;
@@ -122,18 +217,45 @@
 
 <div class="orders-container">
     <div class="orders-header">
-        <h1>Админ-панель</h1>
-        <p>Управление заказами</p>
+        <h1>Админ-панель
+            {% if from_cache %}
+            <span class="cache-badge">Из кэша</span>
+            {% endif %}
+        </h1>
+        <p>Управление заказами и отчетами</p>
+    </div>
+    
+    <div class="stats-row">
+        <div class="stat-card">
+            <div class="stat-value">{{ total_orders }}</div>
+            <div class="stat-label">Всего заказов</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">{{ total_clients }}</div>
+            <div class="stat-label">Клиентов</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">{{ total_revenue|floatformat:0 }} ₽</div>
+            <div class="stat-label">Выручка</div>
+        </div>
+    </div>
+    
+    <div class="reports-row">
+        <a href="/reports/sales" class="report-btn sales">Отчет о продажах</a>
+        <a href="/reports/popular-pizzas" class="report-btn popular">Популярные пиццы</a>
+        <a href="/check-route" class="report-btn">Оптимизация маршрута</a>
+        <a href="/admin-dashboard?refresh=1" class="report-btn refresh-btn">Обновить</a>
+        <a href="/admin/" target="_blank" class="report-btn admin-link">Открыть полную Django-админку</a>
     </div>
 
     <div class="orders-table">
         <table>
             <thead>
                 <tr>
-                    <th>ID</th>
+                    <th>ID заказа</th>
                     <th>Клиент</th>
                     <th>Статус</th>
-                    <th>Тип</th>
+                    <th>Тип доставки</th>
                     <th>Сумма</th>
                 </tr>
             </thead>
@@ -168,15 +290,13 @@
                     </td>
                     <td class="order-amount">{{ order.amount|floatformat:2 }} ₽</td>
                 </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="5" style="text-align: center; padding: 2rem;">Нет заказов</td>
+                </tr>
                 {% endfor %}
             </tbody>
         </table>
-    </div>
-
-    <div style="text-align: center;">
-        <a href="/admin/" target="_blank" class="admin-link">
-            Открыть полную Django-админку →
-        </a>
     </div>
 </div>
 

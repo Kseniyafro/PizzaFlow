@@ -2,11 +2,11 @@ import json
 from django.shortcuts import render, redirect, get_object_or_404
 from django.http import JsonResponse, HttpResponse
 from django.contrib import messages
-from django.db.models import Q
-from .models import *
-from django.contrib.auth.hashers import make_password, check_password
+from django.db.models import Q, Count, Sum
 from django.utils import timezone
 from datetime import datetime, date, timedelta
+from .models import *
+from django.contrib.auth.hashers import make_password, check_password
 from .optimizer import DeliveryOptimizer, PriceCalculator
 from .strategies import (
     OrderContext, StandardPricing, LoyaltyPricing, DiscountPricing,
@@ -16,6 +16,10 @@ from .singletons import ConfigManager, EventBus, CacheManager
 from .factories import ClassicPizzaFactory, MeatLoversFactory, CheeseLoversFactory, VeggieFactory
 from .decorators import BasePizza, ToppingDecorator
 from .observers import OrderSubject, KitchenObserver, CustomerObserver, AdminObserver
+from .proxy import admin_access_required, AdminAccessProxy, CachedReportProxy
+
+admin_proxy = AdminAccessProxy()
+report_proxy = CachedReportProxy()
 
 order_subject = OrderSubject()
 order_subject.attach(KitchenObserver())
@@ -79,6 +83,8 @@ def admin_login(request):
                 request.session['user_id'] = admin.admin_id
                 request.session['role'] = 'admin'
                 request.session['user_name'] = admin.username
+                admin_proxy.set_cached_orders(None)
+                admin_proxy.set_cached_stats(None)
                 return redirect('admin_dashboard')
         except Admin.DoesNotExist:
             pass
@@ -330,13 +336,10 @@ def create_order(request):
         
         order = processor.process(request, cart, total)
         
-        # Обновляем адрес и комментарий
         if delivery_type == 'delivery':
             order.address = address
-        order.comment = comment
         order.save()
         
-        # Получаем скидку
         total_quantity = sum(item['quantity'] for item in cart.values())
         
         if total_quantity >= 3:
@@ -345,12 +348,9 @@ def create_order(request):
         else:
             food_total_with_discount = total
         
-        # Рассчитываем доставку ПРАВИЛЬНО
         if delivery_type == 'pickup':
-            # Самовывоз - всегда бесплатно
             delivery_fee = 0
         else:
-            # Доставка - бесплатно от 500 ₽
             if food_total_with_discount >= 500:
                 delivery_fee = 0
             else:
@@ -358,16 +358,18 @@ def create_order(request):
         
         final_total = food_total_with_discount + delivery_fee
         
-        # Обновляем сумму заказа
         order.amount = final_total
         order.save()
         
         order_subject.notify(order)
         event_bus.publish('order_status_changed', {'order_id': order.order_id, 'status': order.status})
+        
+        admin_proxy.set_cached_orders(None)
+        admin_proxy.set_cached_stats(None)
+        
         messages.success(request, f'Заказ #{order.order_id} успешно создан')
         return redirect('my_orders')
     
-    # GET часть - отображение страницы оформления
     total_quantity = sum(item['quantity'] for item in cart.values())
     
     discount_percent = 0
@@ -378,12 +380,10 @@ def create_order(request):
         pricing_strategy = DiscountPricing(10)
         food_total_with_discount = pricing_strategy.calculate(total, 0, 1)
     
-    # Получаем тип доставки из параметров URL или из сессии
     delivery_type = request.GET.get('delivery_type')
     if not delivery_type:
         delivery_type = request.session.get('last_delivery_type', 'delivery')
     
-    # Сохраняем в сессию для следующего раза
     request.session['last_delivery_type'] = delivery_type
     
     if delivery_type == 'pickup':
@@ -406,7 +406,6 @@ def create_order(request):
             'total': item['price'] * item['quantity']
         })
     
-    # Вычисляем сколько не хватает до бесплатной доставки
     free_delivery_need = max(0, 500 - food_total_with_discount)
     
     context = {
@@ -431,24 +430,61 @@ def my_orders(request):
     orders = Order.objects.filter(client_id=request.session['user_id']).order_by('-created_at')
     return render(request, 'my_orders.html', {'orders': orders})
 
+@admin_access_required()
 def admin_dashboard(request):
     if request.session.get('role') != 'admin':
         return redirect('admin_login')
-    orders = Order.objects.all().order_by('-created_at')
+    
+    force_refresh = request.GET.get('refresh') == '1'
+    
+    if force_refresh:
+        admin_proxy.set_cached_orders(None)
+        admin_proxy.set_cached_stats(None)
+        messages.success(request, 'Кэш очищен! Данные загружены из базы данных.')
+    
+    cached_orders = admin_proxy.get_cached_orders()
+    
+    if cached_orders is not None and not force_refresh:
+        orders = cached_orders
+        from_cache = True
+    else:
+        orders = list(Order.objects.all().order_by('-created_at'))
+        admin_proxy.set_cached_orders(orders)
+        from_cache = False
+    
     ingredients = Ingredient.objects.all()
     clients = Client.objects.all()
     couriers = Courier.objects.all()
+    
+    cached_stats = admin_proxy.get_cached_stats()
+    
+    if cached_stats is not None and not force_refresh:
+        total_orders = cached_stats['total_orders']
+        total_clients = cached_stats['total_clients']
+        total_revenue = cached_stats['total_revenue']
+    else:
+        total_orders = len(orders)
+        total_clients = clients.count()
+        total_revenue = sum(o.amount for o in orders if getattr(o, 'status', '') == 'Доставлен')
+        admin_proxy.set_cached_stats({
+            'total_orders': total_orders,
+            'total_clients': total_clients,
+            'total_revenue': total_revenue
+        })
+    
     context = {
         'orders': orders,
         'ingredients': ingredients,
         'clients': clients,
         'couriers': couriers,
-        'total_orders': orders.count(),
-        'total_clients': clients.count(),
-        'total_revenue': sum(o.amount for o in orders if o.status == 'Доставлен')
+        'total_orders': total_orders,
+        'total_clients': total_clients,
+        'total_revenue': total_revenue,
+        'from_cache': from_cache,
     }
     return render(request, 'admin_dashboard.html', context)
 
+@admin_access_required()
 def kitchen(request):
     if request.session.get('role') != 'admin':
         return redirect('admin_login')
@@ -479,6 +515,10 @@ def update_status(request, order_id):
                     courier = order.courier
                     courier.status = 'Свободен'
                     courier.save()
+            
+            admin_proxy.set_cached_orders(None)
+            admin_proxy.set_cached_stats(None)
+            
             return JsonResponse({
                 'status': order.status, 
                 'order_id': order.order_id,
@@ -494,6 +534,7 @@ def update_status(request, order_id):
         pass
     return JsonResponse({'status': order.status, 'order_id': order.order_id, 'is_finished': True})
 
+@admin_access_required()
 def courier_view(request):
     if request.session.get('role') != 'admin':
         return redirect('admin_login')
@@ -658,6 +699,10 @@ def cancel_order(request, order_id):
                 courier = order.courier
                 courier.status = 'Свободен'
                 courier.save()
+            
+            admin_proxy.set_cached_orders(None)
+            admin_proxy.set_cached_stats(None)
+            
             messages.success(request, f'Заказ #{order_id} отменен')
             return JsonResponse({'success': True, 'message': 'Заказ отменен'})
         else:
@@ -681,6 +726,10 @@ def assign_courier_to_order(request, courier_id):
                 OrderStatusHistory.objects.create(order=order, status='Передан курьеру')
                 order_subject.notify(order)
                 event_bus.publish('order_status_changed', {'order_id': order.order_id, 'status': order.status})
+                
+                admin_proxy.set_cached_orders(None)
+                admin_proxy.set_cached_stats(None)
+                
                 return JsonResponse({'success': True, 'message': f'Курьер {courier.name} назначен на заказ #{order_id}'})
             else:
                 return JsonResponse({'error': 'Courier not available or order not ready'}, status=400)
@@ -688,11 +737,22 @@ def assign_courier_to_order(request, courier_id):
             return JsonResponse({'error': 'Courier or order not found'}, status=404)
     return JsonResponse({'error': 'Method not allowed'}, status=405)
 
+@admin_access_required()
 def sales_report(request):
     if request.session.get('role') != 'admin':
         return redirect('admin_login')
+    
+    force_refresh = request.GET.get('refresh') == '1'
+    
     end_date = datetime.now()
     start_date = end_date - timedelta(days=30)
+    
+    cached_report = report_proxy.get_sales_report(days=30, force_refresh=force_refresh)
+    
+    if cached_report is not None and not force_refresh:
+        cached_report['from_cache'] = True
+        return render(request, 'reports/sales.html', cached_report)
+    
     orders = Order.objects.filter(created_at__gte=start_date, status='Доставлен')
     total_revenue = sum(o.amount for o in orders)
     total_orders = orders.count()
@@ -706,23 +766,57 @@ def sales_report(request):
             'orders': day_orders.count(),
             'revenue': sum(o.amount for o in day_orders)
         })
+    
     context = {
         'total_revenue': total_revenue,
         'total_orders': total_orders,
         'avg_order_value': avg_order_value,
         'daily_stats': daily_stats,
+        'from_cache': False,
     }
+    
+    report_proxy.set_sales_report(30, context)
+    
     return render(request, 'reports/sales.html', context)
 
+@admin_access_required()
 def popular_pizzas_report(request):
     if request.session.get('role') != 'admin':
         return redirect('admin_login')
-    from django.db.models import Count, Sum
-    popular_pizzas = Pizza.objects.annotate(
-        order_count=Count('orderitem'),
-        total_revenue=Sum('orderitem__price')
-    ).filter(order_count__gt=0).order_by('-order_count')[:10]
+    
+    force_refresh = request.GET.get('refresh') == '1'
+    
+    cached_data = report_proxy.get_popular_pizzas_cache(limit=10, force_refresh=force_refresh)
+    
+    if cached_data is not None and not force_refresh:
+        return render(request, 'reports/popular_pizzas.html', {'popular_pizzas': cached_data, 'from_cache': True})
+    
+    from django.db.models import Count
+    
+    popular_pizzas = CustomPizza.objects.filter(
+        client__isnull=False
+    ).values(
+        'composition'
+    ).annotate(
+        order_count=Count('custom_pizza_id')
+    ).order_by('-order_count')[:10]
+    
+    popular_list = []
+    for pizza in popular_pizzas:
+        composition = pizza.get('composition', {})
+        popular_list.append({
+            'name': f"Кастомная пицца",
+            'category': composition.get('factory_style', 'Классическая'),
+            'base_price': 0,
+            'order_count': pizza.get('order_count', 0),
+            'total_revenue': 0,
+            'composition': composition
+        })
+    
+    report_proxy.set_popular_pizzas_cache(10, popular_list)
+    
     context = {
-        'popular_pizzas': popular_pizzas,
+        'popular_pizzas': popular_list,
+        'from_cache': False,
     }
     return render(request, 'reports/popular_pizzas.html', context)
