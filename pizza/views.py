@@ -17,6 +17,8 @@ from .factories import ClassicPizzaFactory, MeatLoversFactory, CheeseLoversFacto
 from .decorators import BasePizza, ToppingDecorator
 from .observers import OrderSubject, KitchenObserver, CustomerObserver, AdminObserver
 from .proxy import admin_access_required, AdminAccessProxy, CachedReportProxy
+from .loyalty_adapter import LoyaltySystemAdapter
+from .external_loyalty_service import LegacyLoyaltySystem
 
 admin_proxy = AdminAccessProxy()
 report_proxy = CachedReportProxy()
@@ -67,6 +69,7 @@ def login_view(request):
                 request.session['user_id'] = user.client_id
                 request.session['role'] = 'client'
                 request.session['user_name'] = user.name
+                request.session['loyalty_points'] = user.loyalty_points
                 return redirect('index')
         except Client.DoesNotExist:
             pass
@@ -360,6 +363,17 @@ def create_order(request):
         
         order.amount = final_total
         order.save()
+
+        legacy_system = LegacyLoyaltySystem()
+        loyalty_adapter = LoyaltySystemAdapter(legacy_system)
+        bonus_to_give = 10
+        success = loyalty_adapter.give_bonus(request.session['user_id'], bonus_to_give)
+        if success:
+            messages.success(request, f'Вам начислено {bonus_to_give} бонусных баллов!')
+            client = Client.objects.get(client_id=request.session['user_id'])
+            request.session['loyalty_points'] = client.loyalty_points
+        else:
+            messages.warning(request, 'Не удалось начислить бонусы.')
         
         order_subject.notify(order)
         event_bus.publish('order_status_changed', {'order_id': order.order_id, 'status': order.status})

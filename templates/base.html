@@ -566,6 +566,13 @@
                         <span class="cart-badge" id="cartCount">{{ cart_count }}</span>
                         {% endif %}
                     </a></li>
+                    {% if request.session.user_id and request.session.role == 'client' %}
+                        <li>
+                            <span style="padding: 8px 15px; display: inline-block; color: yellow;">
+                                ⭐ {{ request.session.loyalty_points|default:"0" }} баллов
+                            </span>
+                        </li>
+                    {% endif %}
                     {% if request.session.user_id %}
                         <li><a href="/logout">Выйти</a></li>
                     {% else %}
