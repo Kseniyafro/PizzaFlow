@@ -32,4 +32,5 @@ urlpatterns = [
     path('reports/popular-pizzas/', views.popular_pizzas_report, name='popular_pizzas'),
     path('favorites/remove/<int:pizza_id>/', views.remove_from_favorites, name='remove_from_favorites'),
     path('admin-notifications/', views.notifications_view, name='notifications'),
+    path('menu-structure/', views.menu_structure, name='menu_structure'),
 ]

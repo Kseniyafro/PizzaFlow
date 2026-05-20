@@ -19,6 +19,7 @@ from .observers import OrderSubject, KitchenObserver, CustomerObserver, AdminObs
 from .proxy import admin_access_required, AdminAccessProxy, CachedReportProxy
 from .loyalty_adapter import LoyaltySystemAdapter
 from .external_loyalty_service import LegacyLoyaltySystem
+from .menu_composite import MenuBuilder, PizzaLeaf, PizzaCategory
 
 admin_proxy = AdminAccessProxy()
 report_proxy = CachedReportProxy()
@@ -834,3 +835,49 @@ def popular_pizzas_report(request):
         'from_cache': False,
     }
     return render(request, 'reports/popular_pizzas.html', context)
+
+def menu_structure(request):
+    menu = MenuBuilder.build_from_database()
+    
+    iterator = menu.create_iterator()
+    
+    all_pizzas = []
+    for pizza_leaf in iterator:
+        all_pizzas.append({
+            'name': pizza_leaf.get_name(),
+            'price': pizza_leaf.get_price(),
+            'description': pizza_leaf.get_description()
+        })
+    
+    tree_structure = []
+    _build_tree_structure(menu, tree_structure)
+    
+    context = {
+        'menu': menu,
+        'all_pizzas': all_pizzas,
+        'tree_structure': tree_structure,
+    }
+    
+    return render(request, 'menu_structure.html', context)
+
+
+def _build_tree_structure(component, output_list, level=0):
+    if isinstance(component, PizzaCategory):
+        output_list.append({
+            'type': 'category',
+            'name': component.get_name(),
+            'description': component.get_description(),
+            'count': component.get_count(),
+            'level': level,
+            'children': []
+        })
+        for child in component._children:
+            _build_tree_structure(child, output_list[-1]['children'], level + 1)
+    elif isinstance(component, PizzaLeaf):
+        output_list.append({
+            'type': 'pizza',
+            'name': component.get_name(),
+            'price': component.get_price(),
+            'description': component.get_description(),
+            'level': level
+        })

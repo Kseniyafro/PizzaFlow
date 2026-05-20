@@ -1,0 +1,22 @@
+{% for item in items %}
+    {% if item.type == 'category' %}
+        <div class="category-node" style="margin-left: {{ item.level|default:0|add:20 }}px;">
+            <div class="category-name">
+                {{ item.name }}
+                <span style="font-size: 0.8rem; color: #666;">
+                    ({{ item.count }}) 
+                </span>
+            </div>
+            <div class="tree-node">
+                {% if item.children %}
+                    {% include 'menu_tree_partial.html' with items=item.children %}
+                {% endif %}
+            </div>
+        </div>
+    {% elif item.type == 'pizza' %}
+        <div class="pizza-node" style="margin-left: {{ item.level|default:0|add:20 }}px;">
+            {{ item.name }}
+            <span class="pizza-price">{{ item.price }} ₽</span>
+        </div>
+    {% endif %}
+{% endfor %}
