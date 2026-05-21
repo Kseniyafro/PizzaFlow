@@ -20,9 +20,18 @@ from .proxy import admin_access_required, AdminAccessProxy, CachedReportProxy
 from .loyalty_adapter import LoyaltySystemAdapter
 from .external_loyalty_service import LegacyLoyaltySystem
 from .menu_composite import MenuBuilder, PizzaLeaf, PizzaCategory
+from .commands import (
+    OrderCommandInvoker,
+    UpdateOrderStatusCommand,
+    CancelOrderCommand,
+    AssignCourierCommand,
+)
 
 admin_proxy = AdminAccessProxy()
 report_proxy = CachedReportProxy()
+
+# Invoker для паттерна «Команда» — хранит историю операций над заказами
+order_invoker = OrderCommandInvoker()
 
 order_subject = OrderSubject()
 order_subject.attach(KitchenObserver())
@@ -507,47 +516,21 @@ def kitchen(request):
     return render(request, 'kitchen.html', {'orders': orders})
 
 def update_status(request, order_id):
-    order = get_object_or_404(Order, order_id=order_id)
-    if order.delivery_type == 'delivery':
-        statuses = ['Принят', 'Готовится', 'В печи', 'Передан курьеру', 'Доставлен']
-    else:
-        statuses = ['Принят', 'Готовится', 'В печи', 'Доставлен']
-    try:
-        idx = statuses.index(order.status)
-        if idx < len(statuses) - 1:
-            new_status = statuses[idx + 1]
-            order.status = new_status
-            order.save()
-            OrderStatusHistory.objects.create(order=order, status=order.status)
-            order_subject.notify(order)
-            event_bus.publish('order_status_changed', {'order_id': order.order_id, 'status': order.status})
-            if order.delivery_type == 'delivery':
-                if order.status == 'Передан курьеру' and order.courier:
-                    courier = order.courier
-                    courier.status = 'В пути'
-                    courier.save()
-                elif order.status == 'Доставлен' and order.courier:
-                    courier = order.courier
-                    courier.status = 'Свободен'
-                    courier.save()
-            
-            admin_proxy.set_cached_orders(None)
-            admin_proxy.set_cached_stats(None)
-            
-            return JsonResponse({
-                'status': order.status, 
-                'order_id': order.order_id,
-                'is_finished': False
-            })
-        else:
-            return JsonResponse({
-                'status': order.status, 
-                'order_id': order.order_id,
-                'is_finished': True
-            })
-    except ValueError:
-        pass
-    return JsonResponse({'status': order.status, 'order_id': order.order_id, 'is_finished': True})
+    # ── Паттерн «Команда» ──────────────────────────────────────────────────
+    # Вместо прямой манипуляции с моделью создаём объект команды и передаём
+    # его инвокеру.  Вся бизнес-логика (следующий статус, уведомления,
+    # синхронизация курьера) инкапсулирована внутри UpdateOrderStatusCommand.
+    command = UpdateOrderStatusCommand(order_id=order_id)
+    result  = order_invoker.run(command)
+
+    admin_proxy.set_cached_orders(None)
+    admin_proxy.set_cached_stats(None)
+
+    return JsonResponse({
+        'status':      result.get('status', ''),
+        'order_id':    order_id,
+        'is_finished': result.get('is_finished', not result.get('success', False)),
+    })
 
 @admin_access_required()
 def courier_view(request):
@@ -701,55 +684,39 @@ def order_tracking(request, order_id):
 def cancel_order(request, order_id):
     if 'user_id' not in request.session:
         return JsonResponse({'error': 'Not authenticated'}, status=401)
-    try:
-        order = Order.objects.get(order_id=order_id, client_id=request.session['user_id'])
-        cancel_allowed_statuses = ['Принят', 'Готовится', 'В печи']
-        if order.status in cancel_allowed_statuses:
-            order.status = 'Отменен'
-            order.save()
-            OrderStatusHistory.objects.create(order=order, status='Отменен')
-            order_subject.notify(order)
-            event_bus.publish('order_status_changed', {'order_id': order.order_id, 'status': order.status})
-            if order.courier:
-                courier = order.courier
-                courier.status = 'Свободен'
-                courier.save()
-            
-            admin_proxy.set_cached_orders(None)
-            admin_proxy.set_cached_stats(None)
-            
-            messages.success(request, f'Заказ #{order_id} отменен')
-            return JsonResponse({'success': True, 'message': 'Заказ отменен'})
-        else:
-            return JsonResponse({'error': 'Cannot cancel order in current status'}, status=400)
-    except Order.DoesNotExist:
-        return JsonResponse({'error': 'Order not found'}, status=404)
+
+    # ── Паттерн «Команда» ──────────────────────────────────────────────────
+    command = CancelOrderCommand(
+        order_id=order_id,
+        client_id=request.session['user_id'],
+    )
+    result = order_invoker.run(command)
+    # ───────────────────────────────────────────────────────────────────────
+
+    admin_proxy.set_cached_orders(None)
+    admin_proxy.set_cached_stats(None)
+
+    if result['success']:
+        messages.success(request, result['message'])
+        return JsonResponse({'success': True, 'message': result['message']})
+    return JsonResponse({'error': result['message']}, status=400)
 
 def assign_courier_to_order(request, courier_id):
     if request.method == 'POST':
-        data = json.loads(request.body)
+        data     = json.loads(request.body)
         order_id = data.get('order_id')
-        try:
-            courier = Courier.objects.get(courier_id=courier_id)
-            order = Order.objects.get(order_id=order_id)
-            if courier.status == 'Свободен' and order.status == 'В печи' and order.delivery_type == 'delivery':
-                order.courier = courier
-                order.status = 'Передан курьеру'
-                order.save()
-                courier.status = 'В пути'
-                courier.save()
-                OrderStatusHistory.objects.create(order=order, status='Передан курьеру')
-                order_subject.notify(order)
-                event_bus.publish('order_status_changed', {'order_id': order.order_id, 'status': order.status})
-                
-                admin_proxy.set_cached_orders(None)
-                admin_proxy.set_cached_stats(None)
-                
-                return JsonResponse({'success': True, 'message': f'Курьер {courier.name} назначен на заказ #{order_id}'})
-            else:
-                return JsonResponse({'error': 'Courier not available or order not ready'}, status=400)
-        except (Courier.DoesNotExist, Order.DoesNotExist):
-            return JsonResponse({'error': 'Courier or order not found'}, status=404)
+
+        # ── Паттерн «Команда» ──────────────────────────────────────────────
+        command = AssignCourierCommand(order_id=order_id, courier_id=courier_id)
+        result  = order_invoker.run(command)
+        # ───────────────────────────────────────────────────────────────────
+
+        admin_proxy.set_cached_orders(None)
+        admin_proxy.set_cached_stats(None)
+
+        if result['success']:
+            return JsonResponse({'success': True, 'message': result['message']})
+        return JsonResponse({'error': result['message']}, status=400)
     return JsonResponse({'error': 'Method not allowed'}, status=405)
 
 @admin_access_required()
