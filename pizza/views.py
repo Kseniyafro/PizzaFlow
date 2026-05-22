@@ -321,7 +321,7 @@ def update_cart_quantity(request):
             })
     return JsonResponse({'success': False, 'error': 'Invalid request'})
 
-def create_order(request):
+
     if 'user_id' not in request.session:
         return redirect('login')
     
@@ -425,6 +425,76 @@ def create_order(request):
     }
     return render(request, 'checkout.html', context)
 
+def create_order(request):
+    if 'user_id' not in request.session:
+        return redirect('login')
+    
+    cart = request.session.get('cart', {})
+    total = sum(item['price'] * item['quantity'] for item in cart.values())
+    
+    if total == 0:
+        messages.warning(request, 'Корзина пуста')
+        return redirect('constructor')
+    
+    if request.method == 'POST':
+        delivery_type = request.POST.get('delivery_type')
+        address = request.POST.get('address', '')
+        comment = request.POST.get('comment', '')
+        
+        from .facade import order_facade
+        
+        success, order, message = order_facade.create_order(
+            request=request,
+            cart=cart,
+            total=total,
+            delivery_type=delivery_type,
+            address=address,
+            comment=comment
+        )
+        
+        if success:
+            messages.success(request, message)
+            
+            request.session['cart'] = {}
+            
+            bonus_to_give = order_facade._config.get('bonus_points_per_order', 10)
+            if success:
+                messages.info(request, f'Вам начислено {bonus_to_give} бонусных баллов!')
+            
+            return redirect('my_orders')
+        else:
+            messages.error(request, message)
+            return redirect('cart')
+    
+    delivery_type = request.GET.get('delivery_type')
+    if not delivery_type:
+        delivery_type = request.session.get('last_delivery_type', 'delivery')
+    
+    request.session['last_delivery_type'] = delivery_type
+    
+    from .facade import order_facade
+    
+    preview = order_facade.calculate_order_preview(cart, total, delivery_type)
+    
+    cart_items = []
+    for key, item in cart.items():
+        cart_items.append({
+            'key': key,
+            'name': item['name'],
+            'price': item['price'],
+            'quantity': item['quantity'],
+            'total': item['price'] * item['quantity']
+        })
+    
+    context = {
+        'cart_items': cart_items,
+        'selected_delivery_type': delivery_type,
+        'address': request.GET.get('address', ''),
+        'comment': request.GET.get('comment', ''),
+        **preview 
+    }
+    
+    return render(request, 'checkout.html', context)
 
 def my_orders(request):
     if 'user_id' not in request.session:
