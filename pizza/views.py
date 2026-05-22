@@ -29,10 +29,7 @@ from .commands import (
 
 admin_proxy = AdminAccessProxy()
 report_proxy = CachedReportProxy()
-
-# Invoker для паттерна «Команда» — хранит историю операций над заказами
 order_invoker = OrderCommandInvoker()
-
 order_subject = OrderSubject()
 order_subject.attach(KitchenObserver())
 order_subject.attach(CustomerObserver())
@@ -516,10 +513,6 @@ def kitchen(request):
     return render(request, 'kitchen.html', {'orders': orders})
 
 def update_status(request, order_id):
-    # ── Паттерн «Команда» ──────────────────────────────────────────────────
-    # Вместо прямой манипуляции с моделью создаём объект команды и передаём
-    # его инвокеру.  Вся бизнес-логика (следующий статус, уведомления,
-    # синхронизация курьера) инкапсулирована внутри UpdateOrderStatusCommand.
     command = UpdateOrderStatusCommand(order_id=order_id)
     result  = order_invoker.run(command)
 
@@ -685,13 +678,11 @@ def cancel_order(request, order_id):
     if 'user_id' not in request.session:
         return JsonResponse({'error': 'Not authenticated'}, status=401)
 
-    # ── Паттерн «Команда» ──────────────────────────────────────────────────
     command = CancelOrderCommand(
         order_id=order_id,
         client_id=request.session['user_id'],
     )
     result = order_invoker.run(command)
-    # ───────────────────────────────────────────────────────────────────────
 
     admin_proxy.set_cached_orders(None)
     admin_proxy.set_cached_stats(None)
@@ -705,12 +696,8 @@ def assign_courier_to_order(request, courier_id):
     if request.method == 'POST':
         data     = json.loads(request.body)
         order_id = data.get('order_id')
-
-        # ── Паттерн «Команда» ──────────────────────────────────────────────
         command = AssignCourierCommand(order_id=order_id, courier_id=courier_id)
         result  = order_invoker.run(command)
-        # ───────────────────────────────────────────────────────────────────
-
         admin_proxy.set_cached_orders(None)
         admin_proxy.set_cached_stats(None)
 
@@ -848,3 +835,4 @@ def _build_tree_structure(component, output_list, level=0):
             'description': component.get_description(),
             'level': level
         })
+

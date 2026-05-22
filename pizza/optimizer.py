@@ -15,11 +15,9 @@ class DeliveryOptimizer:
             lat1, lng1, lat2, lng2 = map(float, [lat1, lng1, lat2, lng2])
         except (ValueError, TypeError):
             return 0.0
-#   переводит градусы в радианы формула гаверсинуса для расчета расстояния между двумя точками на сфере
         phi1, phi2 = math.radians(lat1), math.radians(lat2)
         dphi = math.radians(lat2 - lat1)
         dlambda = math.radians(lng2 - lng1)
-#   формула гаверсинуса для расчета расстояния между двумя точками на сфере
         a = math.sin(dphi/2)**2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda/2)**2
         c = 2 * math.asin(min(1, math.sqrt(a)))
         return R * c

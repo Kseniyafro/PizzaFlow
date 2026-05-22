@@ -1,7 +1,5 @@
 from abc import ABC, abstractmethod
 
-# ============ Стратегии ценообразования ============
-
 class PricingStrategy(ABC):
     @abstractmethod
     def calculate(self, base_price, toppings_price, quantity):
@@ -41,8 +39,6 @@ class LoyaltyPricing(PricingStrategy):
         max_discount = min(self.loyalty_points, total * 0.2)
         return total - max_discount
 
-
-# ============ Стратегии доставки ============
 
 class DeliveryStrategy(ABC):
     @abstractmethod

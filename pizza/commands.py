@@ -30,7 +30,6 @@ from .external_loyalty_service import LegacyLoyaltySystem
 # Базовый интерфейс команды
 
 class Command(ABC):
-    """Абстрактная команда: обязательно execute(), опционально undo()."""
 
     @abstractmethod
     def execute(self) -> dict:
@@ -40,11 +39,8 @@ class Command(ABC):
         """
 
     def undo(self) -> dict:
-        """Откатить команду (реализуется при необходимости)."""
         return {'success': False, 'message': 'Откат не поддерживается для этой команды'}
 
-
-# Общие зависимости (Observers / EventBus)
 
 def _make_order_subject() -> OrderSubject:
     subject = OrderSubject()
@@ -53,14 +49,7 @@ def _make_order_subject() -> OrderSubject:
     subject.attach(AdminObserver())
     return subject
 
-
-# Конкретные команды
-
 class PlaceOrderCommand(Command):
-    """
-    Команда: создать новый заказ.
-    Receiver — Order (модель).
-    """
 
     DELIVERY_STATUSES = ['Принят', 'Готовится', 'В печи', 'Передан курьеру', 'Доставлен']
     PICKUP_STATUSES   = ['Принят', 'Готовится', 'В печи', 'Доставлен']
@@ -92,7 +81,6 @@ class PlaceOrderCommand(Command):
         subject.notify(order)
         EventBus().publish('order_placed', {'order_id': order.order_id})
 
-        # Начисляем бонусы
         loyalty_adapter = LoyaltySystemAdapter(LegacyLoyaltySystem())
         loyalty_adapter.give_bonus(self.client_id, 10)
 
@@ -103,7 +91,6 @@ class PlaceOrderCommand(Command):
         }
 
     def undo(self) -> dict:
-        """Отмена: удалить только что созданный заказ (если ещё «Принят»)."""
         if self._created_order and self._created_order.status == 'Принят':
             order_id = self._created_order.order_id
             self._created_order.delete()
@@ -112,11 +99,6 @@ class PlaceOrderCommand(Command):
 
 
 class UpdateOrderStatusCommand(Command):
-    """
-    Команда: перевести заказ на следующий статус по цепочке.
-    Receiver — Order.
-    """
-
     DELIVERY_STATUSES = ['Принят', 'Готовится', 'В печи', 'Передан курьеру', 'Доставлен']
     PICKUP_STATUSES   = ['Принят', 'Готовится', 'В печи', 'Доставлен']
 
@@ -145,8 +127,6 @@ class UpdateOrderStatusCommand(Command):
         order.save()
 
         OrderStatusHistory.objects.create(order=order, status=new_status)
-
-        # Синхронизация курьера
         if order.delivery_type == 'delivery' and order.courier:
             courier = order.courier
             if new_status == 'Передан курьеру':
@@ -169,7 +149,6 @@ class UpdateOrderStatusCommand(Command):
         }
 
     def undo(self) -> dict:
-        """Откатить статус на предыдущий."""
         if self._previous_status is None:
             return {'success': False, 'message': 'Нечего откатывать'}
         order = Order.objects.get(order_id=self.order_id)
@@ -184,11 +163,6 @@ class UpdateOrderStatusCommand(Command):
 
 
 class CancelOrderCommand(Command):
-    """
-    Команда: отменить заказ клиентом.
-    Receiver — Order, Courier.
-    """
-
     ALLOWED_STATUSES = ['Принят', 'Готовится', 'В печи']
 
     def __init__(self, order_id: int, client_id: int):
@@ -228,7 +202,6 @@ class CancelOrderCommand(Command):
         }
 
     def undo(self) -> dict:
-        """Восстановить отменённый заказ."""
         if self._previous_status is None:
             return {'success': False, 'message': 'Нечего откатывать'}
         try:
@@ -258,11 +231,6 @@ class CancelOrderCommand(Command):
 
 
 class AssignCourierCommand(Command):
-    """
-    Команда: назначить курьера на заказ.
-    Receiver — Order, Courier.
-    """
-
     def __init__(self, order_id: int, courier_id: int):
         self.order_id   = order_id
         self.courier_id = courier_id
@@ -329,30 +297,19 @@ class AssignCourierCommand(Command):
         }
 
 
-# Invoker — менеджер команд
 
 class OrderCommandInvoker:
-    """
-    Вызывающий (Invoker).
-    Хранит историю выполненных команд и предоставляет
-    метод undo_last() для отката последней операции.
-
-    Используется как синглтон уровня запроса — создаётся один раз
-    и передаётся во view-функции.
-    """
 
     def __init__(self):
         self._history: list[Command] = []
 
     def run(self, command: Command) -> dict:
-        """Выполнить команду и сохранить её в историю."""
         result = command.execute()
         if result.get('success'):
             self._history.append(command)
         return result
 
     def undo_last(self) -> dict:
-        """Откатить последнюю успешную команду."""
         if not self._history:
             return {'success': False, 'message': 'История команд пуста'}
         command = self._history.pop()

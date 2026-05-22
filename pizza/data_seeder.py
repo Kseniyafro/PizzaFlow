@@ -3,7 +3,6 @@ from abc import ABC, abstractmethod
 class BaseDataSeeder(ABC):
     
     def run(self):
-        # self.clear_data()  # ЗАКОММЕНТИРОВАНО - данные НЕ удаляются
         self.create_ingredients()
         self.create_pizzas()
         self.create_clients()
