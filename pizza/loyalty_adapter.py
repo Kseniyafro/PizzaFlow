@@ -6,9 +6,13 @@ class ILoyaltyService(ABC):
     @abstractmethod
     def give_bonus(self, client_id: int, bonus_points: int):
         pass
+    
+    @abstractmethod
+    def spend_bonus(self, client_id: int, bonus_points: int):
+        pass
+
 
 class LoyaltySystemAdapter(ILoyaltyService):
-    
     def __init__(self, legacy_system: LegacyLoyaltySystem):
         self._legacy_system = legacy_system
     
@@ -17,33 +21,41 @@ class LoyaltySystemAdapter(ILoyaltyService):
         existing_client = self._legacy_system.get_client_by_external_id(external_id)
         
         if existing_client is None:
-            print(f"DEBUG: [Adapter] Клиент '{client.name}' не найден во внешней системе. Создаем...")
             new_external_client = ExternalClientData(external_id, client.name)
             self._legacy_system._clients_db[external_id] = new_external_client
-            print(f"DEBUG: [Adapter] Клиент '{client.name}' успешно создан во внешней системе!")
             return True
-        else:
-            print(f"DEBUG: [Adapter] Клиент '{client.name}' уже существует во внешней системе")
-            return True
+        return True
     
     def give_bonus(self, client_id: int, bonus_points: int):
         try:
             our_client = Client.objects.get(client_id=client_id)
         except Client.DoesNotExist:
-            print(f"ERROR: Адаптер не нашел клиента с id={client_id}")
             return False
         
         self._ensure_client_exists(our_client)
-        
         external_id = f"ext_{our_client.email}"
-        
-        print(f"DEBUG: [Adapter] Вызываю старую систему для клиента '{our_client.name}'")
         success = self._legacy_system.add_bonus_points(external_id, bonus_points)
         
         if success:
             our_client.loyalty_points += bonus_points
             our_client.save()
-            print(f"DEBUG: [Adapter] Теперь у {our_client.name} {our_client.loyalty_points} баллов")
-            print(f"DEBUG: [Adapter] Бонусы успешно начислены!")
-        
         return success
+
+    def spend_bonus(self, client_id: int, bonus_points: int):
+        try:
+            our_client = Client.objects.get(client_id=client_id)
+        except Client.DoesNotExist:
+            return False
+
+        if our_client.loyalty_points < bonus_points:
+            return False
+
+        self._ensure_client_exists(our_client)
+        external_id = f"ext_{our_client.email}"
+        success = self._legacy_system.spend_bonus_points(external_id, bonus_points)
+        
+        if success:
+            our_client.loyalty_points -= bonus_points
+            our_client.save()
+            return True
+        return False

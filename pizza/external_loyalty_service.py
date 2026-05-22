@@ -23,3 +23,11 @@ class LegacyLoyaltySystem:
         else:
             print(f"DEBUG: [LegacySystem] Ошибка! Клиент '{external_client_id}' не найден.")
             return False
+
+    def spend_bonus_points(self, external_client_id: str, points: int):
+        client = self.get_client_by_external_id(external_client_id)
+        if not client:
+            print(f"DEBUG: [LegacySystem] Ошибка! Клиент '{external_client_id}' не найден при списании.")
+            return False
+        print(f"DEBUG: [LegacySystem] Списано {points} бонусов у клиента '{client.username}'.")
+        return True

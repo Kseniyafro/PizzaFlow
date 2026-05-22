@@ -336,6 +336,7 @@ def create_order(request):
         delivery_type = request.POST.get('delivery_type')
         address = request.POST.get('address', '')
         comment = request.POST.get('comment', '')
+        use_points = int(request.POST.get('use_points', 0))
         
         from .order_processor import DeliveryOrderProcessor, PickupOrderProcessor
         
@@ -361,76 +362,53 @@ def create_order(request):
         if delivery_type == 'pickup':
             delivery_fee = 0
         else:
-            if food_total_with_discount >= 500:
-                delivery_fee = 0
-            else:
-                delivery_fee = 200
+            delivery_fee = 0 if food_total_with_discount >= 500 else 200
         
         final_total = food_total_with_discount + delivery_fee
+
+        points_used = 0
+        if use_points > 0:
+            legacy_system = LegacyLoyaltySystem()
+            loyalty_adapter = LoyaltySystemAdapter(legacy_system)
+            if loyalty_adapter.spend_bonus(request.session['user_id'], use_points):
+                points_used = use_points
+                final_total = max(0, final_total - points_used)
+                messages.success(request, f'Использовано {points_used} баллов')
         
         order.amount = final_total
         order.save()
 
         legacy_system = LegacyLoyaltySystem()
         loyalty_adapter = LoyaltySystemAdapter(legacy_system)
-        bonus_to_give = 10
-        success = loyalty_adapter.give_bonus(request.session['user_id'], bonus_to_give)
-        if success:
-            messages.success(request, f'Вам начислено {bonus_to_give} бонусных баллов!')
-            client = Client.objects.get(client_id=request.session['user_id'])
-            request.session['loyalty_points'] = client.loyalty_points
-        else:
-            messages.warning(request, 'Не удалось начислить бонусы.')
+        loyalty_adapter.give_bonus(request.session['user_id'], 10)
         
+        client = Client.objects.get(client_id=request.session['user_id'])
+        request.session['loyalty_points'] = client.loyalty_points
+
         order_subject.notify(order)
         event_bus.publish('order_status_changed', {'order_id': order.order_id, 'status': order.status})
         
         admin_proxy.set_cached_orders(None)
         admin_proxy.set_cached_stats(None)
         
-        messages.success(request, f'Заказ #{order.order_id} успешно создан')
+        request.session['cart'] = {}
+        
+        messages.success(request, f'Заказ #{order.order_id} успешно создан на сумму {final_total} ₽')
         return redirect('my_orders')
     
     total_quantity = sum(item['quantity'] for item in cart.values())
+    discount_percent = 10 if total_quantity >= 3 else 0
+    food_total_with_discount = total * 0.9 if discount_percent > 0 else total
     
-    discount_percent = 0
-    food_total_with_discount = total
-    
-    if total_quantity >= 3:
-        discount_percent = 10
-        pricing_strategy = DiscountPricing(10)
-        food_total_with_discount = pricing_strategy.calculate(total, 0, 1)
-    
-    delivery_type = request.GET.get('delivery_type')
-    if not delivery_type:
-        delivery_type = request.session.get('last_delivery_type', 'delivery')
-    
+    delivery_type = request.GET.get('delivery_type', request.session.get('last_delivery_type', 'delivery'))
     request.session['last_delivery_type'] = delivery_type
-    
-    if delivery_type == 'pickup':
-        delivery_fee = 0
-    else:
-        if food_total_with_discount >= 500:
-            delivery_fee = 0
-        else:
-            delivery_fee = 200
-    
+    delivery_fee = 0 if delivery_type == 'pickup' else (0 if food_total_with_discount >= 500 else 200)
     grand_total = food_total_with_discount + delivery_fee
     
-    cart_items = []
-    for key, item in cart.items():
-        cart_items.append({
-            'key': key,
-            'name': item['name'],
-            'price': item['price'],
-            'quantity': item['quantity'],
-            'total': item['price'] * item['quantity']
-        })
-    
-    free_delivery_need = max(0, 500 - food_total_with_discount)
+    client = Client.objects.get(client_id=request.session['user_id'])
     
     context = {
-        'cart_items': cart_items,
+        'cart_items': [{'key': key, 'name': item['name'], 'price': item['price'], 'quantity': item['quantity'], 'total': item['price'] * item['quantity']} for key, item in cart.items()],
         'total': total,
         'discount_percent': discount_percent,
         'discount_amount': total - food_total_with_discount,
@@ -438,12 +416,15 @@ def create_order(request):
         'delivery_fee': delivery_fee,
         'grand_total': grand_total,
         'free_delivery_threshold': 500,
-        'free_delivery_need': free_delivery_need,
+        'free_delivery_need': max(0, 500 - food_total_with_discount),
         'selected_delivery_type': delivery_type,
         'address': request.GET.get('address', ''),
         'comment': request.GET.get('comment', ''),
+        'current_points': client.loyalty_points,
+        'max_points_to_use': min(client.loyalty_points, int(grand_total)),
     }
     return render(request, 'checkout.html', context)
+
 
 def my_orders(request):
     if 'user_id' not in request.session:
@@ -836,3 +817,32 @@ def _build_tree_structure(component, output_list, level=0):
             'level': level
         })
 
+def redeem_points(request):
+    if 'user_id' not in request.session:
+        messages.error(request, 'Войдите в аккаунт')
+        return redirect('login')
+    
+    if request.method == 'POST':
+        points_to_spend = int(request.POST.get('points', 0))
+        
+        if points_to_spend <= 0:
+            messages.error(request, 'Укажите корректное количество баллов')
+            return redirect('redeem_points')
+        
+        legacy_system = LegacyLoyaltySystem()
+        loyalty_adapter = LoyaltySystemAdapter(legacy_system)
+        
+        success = loyalty_adapter.spend_bonus(request.session['user_id'], points_to_spend)
+        
+        if success:
+            messages.success(request, f'Успешно списано {points_to_spend} баллов!')
+        else:
+            messages.error(request, 'Не удалось списать баллы. Проверьте их количество.')
+        
+        return redirect('my_orders')
+    
+    client = Client.objects.get(client_id=request.session['user_id'])
+    context = {
+        'current_points': client.loyalty_points,
+    }
+    return render(request, 'redeem_points.html', context)
